@@ -195,4 +195,4 @@ az group delete -n "rg-<hip_organization_name>-network-<hip_do_environmentletter
 ## Further reading
 
 - [Part 1: VNet injection, workspaces & the workspace gateway](https://sahinozdemir.nl/deploying-azure-api-management-v2-with-vnet-injection-workspaces-and-a-workspace-gateway-the-parts-nobody-documented/)
-- Part 2: Sealing the gateway (this sample's source article)
+- [Part 2: Sealing the gateway (this sample's source article)](https://sahinozdemir.nl/sealing-the-gateway-taking-api-management-v2-with-workspace-gateways-fully-private-behind-a-waf-part-2/)
