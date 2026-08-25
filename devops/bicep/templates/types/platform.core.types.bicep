@@ -58,7 +58,7 @@ type mainCoreConfigurationType = {
   }?
   @description('When provided, deploys a public-facing Application Gateway (WAF_v2) routing to APIM, the only public access Internal mode APIM has. Omit to leave APIM VNet/VPN/ExpressRoute-only. TLS certificate data/password aren\'t part of this object (Bicep can\'t mark object properties as secure); they\'re separate top-level secure params instead, see ApplicationGatewaySslCertificateData/Password on platform.core.bicep.')
   applicationGateway: {
-    @description('CIDR address space for the dedicated Application Gateway subnet (e.g. "10.0.5.0/27"). Minimum /27 (32 addresses) per Azure Application Gateway v2 requirements. Must not be delegated and cannot be shared with any other resource.')
+    @description('CIDR address space for the dedicated Application Gateway subnet (e.g. "10.0.5.0/24"). Minimum /27 (32 addresses) per Azure Application Gateway v2 requirements, /24 recommended for headroom. Must not be delegated and cannot be shared with any other resource.')
     addressSpace: string
     @description('Minimum autoscale capacity (scale units). Defaults to 0 (scales to zero when idle).')
     minCapacity: int?

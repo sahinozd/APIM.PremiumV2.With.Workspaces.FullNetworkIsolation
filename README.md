@@ -126,7 +126,7 @@ PremiumV2 activation is slow and rate-limited per subscription (roughly a 60-min
 ```pwsh
 pwsh ./devops/pipelines/scripts/validate.apim.applicationgateway.prerequisites.ps1 `
   -ApiManagementInternalSubnetAddressSpace "10.0.1.0/24" `
-  -ApplicationGatewaySubnetAddressSpace "10.0.5.0/27" `
+  -ApplicationGatewaySubnetAddressSpace "10.0.5.0/24" `
   -ApplicationGatewaySslCertificateData (Get-Content ./agw-demo.pfx.b64 -Raw) `
   -ApplicationGatewaySslCertificatePassword "ChangeMe123!" `
   -ApiManagementSku "PremiumV2"
@@ -144,7 +144,7 @@ az deployment group create \
     AddressSpaceCoreApimanagementInternal="10.0.1.0/24" \
     AddressSpaceCoreApimanagementGatewayMain="10.0.9.0/24" \
     ApiManagementGatewayMainVirtualNetworkType="Internal" \
-    AddressSpaceCoreApplicationGateway="10.0.5.0/27" \
+    AddressSpaceCoreApplicationGateway="10.0.5.0/24" \
     ApplicationGatewaySslCertificateData="$(cat agw-demo.pfx.b64)" \
     ApplicationGatewaySslCertificatePassword="ChangeMe123!" \
     ApiManagementPublisherEmail="you@example.com" \

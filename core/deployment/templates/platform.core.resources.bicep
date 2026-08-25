@@ -11,7 +11,7 @@ import * as types from '../../../devops/bicep/templates/types/platform.core.type
 @description('CIDR address space for the API Management VNet-injection subnet (e.g. "10.0.1.0/24"), used to fully isolate the default/main gateway (Internal mode, PremiumV2 only). Minimum /27, /24 recommended for scale-out headroom. Leave empty to deploy without VNet connectivity for the main gateway.')
 param AddressSpaceCoreApimanagementInternal string = ''
 
-@description('CIDR address space for the dedicated Application Gateway subnet (e.g. "10.0.5.0/27"). Minimum /27. Leave empty to skip Application Gateway deployment, in which case APIM will have no public path at all (VNet/VPN/ExpressRoute access only).')
+@description('CIDR address space for the dedicated Application Gateway subnet (e.g. "10.0.5.0/24"). Minimum /27 per Azure Application Gateway v2 requirements, /24 recommended, this subnet also carries one frontend port per workspace gateway backend, so it grows with gateway count. Leave empty to skip Application Gateway deployment, in which case APIM will have no public path at all (VNet/VPN/ExpressRoute access only).')
 param AddressSpaceCoreApplicationGateway string = ''
 
 @description('Base64-encoded PFX certificate data for the Application Gateway HTTPS listener. Required when AddressSpaceCoreApplicationGateway is set. Provisioning the actual certificate (self-signed for dev, a real certificate for production) is a manual prerequisite, see README.')
