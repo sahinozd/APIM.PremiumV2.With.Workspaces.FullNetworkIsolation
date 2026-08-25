@@ -1,6 +1,6 @@
 # Sealing the Gateway, minimal working sample
 
-A self-contained, deployable extraction of the Bicep behind ["Sealing the Gateway"](https://sahinozdemir.nl) (part 2 of the Azure API Management v2 series, following [part 1](https://sahinozdemir.nl/deploying-azure-api-management-v2-with-vnet-injection-workspaces-and-a-workspace-gateway-the-parts-nobody-documented/)):
+A self-contained, deployable extraction of the Bicep behind ["Sealing the Gateway"](https://sahinozdemir.nl/sealing-the-gateway-taking-api-management-v2-with-workspace-gateways-fully-private-behind-a-waf-part-2/) (part 2 of the Azure API Management v2 series, following [part 1](https://sahinozdemir.nl/deploying-azure-api-management-v2-with-vnet-injection-workspaces-and-a-workspace-gateway-the-parts-nobody-documented/)):
 
 - API Management v2 (PremiumV2), **main gateway in Internal mode**, no public inbound of its own
 - A **workspace gateway**, also Internal, serving two sample workspaces
