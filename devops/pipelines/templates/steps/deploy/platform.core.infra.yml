@@ -2,9 +2,8 @@ parameters:
   - name: AzureDevOpsServiceConnection
     type: string
 
-# This is a working deployment path, driven by core/pipeline/pipeline.yml, not just reference. The
-# CLI walkthrough in README is still the faster way to try this out; use this one if you actually want
-# it running in Azure DevOps. One change versus the full platform's copy of this file:
+# This is the working deployment path documented in README, driven by core/pipeline/pipeline.yml, not
+# just reference. One change versus the full platform's copy of this file:
 #   -ApiManagementName and -PrivateDnsZoneName below were corrected to include "-v2-": the upstream
 #   platform's copy of this step is missing it (platform.core.bicep names the service
 #   "apim-v2-{org}-core-{env}", see the "TODO: change back to apim- without v2" comment there), which

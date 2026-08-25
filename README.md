@@ -76,14 +76,13 @@ devops/pipelines/
     steps/deploy/platform.core.infra.yml / ...network...            the actual step sequence (validate, deploy, set DNS)
 ```
 
-Two ways to run this: the **Azure CLI walkthrough** below (fastest way to try it out, no Azure DevOps needed), or the **Azure DevOps pipeline** (`core/pipeline/pipeline.yml` and `network/pipeline/pipeline.yml`), documented after it. Both drive the exact same Bicep.
+Deployment is driven entirely by two Azure DevOps pipelines that run the Bicep above: `network/pipeline/pipeline.yml` builds the VNet + private DNS zone, `core/pipeline/pipeline.yml` builds APIM + workspace gateway + Application Gateway. Both are documented below, along with the variable group they read their values from.
 
 ## Prerequisites
 
 - An Azure subscription, with **PremiumV2 API Management available in your target region**, check [Microsoft's regional availability list](https://learn.microsoft.com/en-us/azure/api-management/v2-service-tiers-overview) before picking a region; not every region has it.
-- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) with the Bicep tooling (`az bicep install`), or the standalone `bicep` CLI.
-- PowerShell 7+ with the `Az` module (`Install-Module Az`) for the two pipeline scripts.
-- Contributor rights on the target subscription (or at minimum on the resource groups you create below).
+- An Azure DevOps project with this repository added as a source (import the GitHub repo, or push it into an Azure Repos project, either works), and the `qetza.replacetokens` extension installed from the Marketplace, the pipeline steps depend on it.
+- An Azure Resource Manager service connection scoped to the target subscription, with Contributor rights on it (or at minimum on the resource groups the pipelines create), see step 2 in **Deploy via Azure DevOps pipeline** below for how to set it up.
 - A TLS certificate as a base64-encoded PFX for the Application Gateway listener. Self-signed is fine for trying this out:
 
   ```powershell
@@ -94,158 +93,51 @@ Two ways to run this: the **Azure CLI walkthrough** below (fastest way to try it
   $b64 | Out-File ".\agw-demo.pfx.b64" -NoNewline
   ```
 
-  Browsers will flag a self-signed cert; that's expected for a local test. Use a real certificate for anything beyond a smoke test.
-
-## Deploy via Azure CLI
-
-All commands assume `bash`/`pwsh` in the repo root of this folder, and that you're logged in (`az login`) with the right subscription selected (`az account set --subscription <id>`).
-
-Pick your naming values once and reuse them everywhere below:
-
-```bash
-ORG_NAME="contoso"          # OrganizationName
-ORG_SHORT="con"             # OrganizationShortName, max 4 chars
-ENV_LETTER="o"               # o | t | a | p
-LOCATION="norwayeast"        # must have PremiumV2 APIM available
-WORKLOAD_NAME="sample"
-WORKLOAD_SHORT="smp"
-```
-
-### 1. Deploy the network
-
-```bash
-az group create -n "rg-${ORG_NAME}-network-${ENV_LETTER}" -l $LOCATION
-
-az deployment group create \
-  -g "rg-${ORG_NAME}-network-${ENV_LETTER}" \
-  --template-file network/deployment/templates/platform.network.resources.bicep \
-  --parameters \
-    AddressSpaceVirtualNetwork="10.0.0.0/16" \
-    OrganizationName=$ORG_NAME \
-    OrganizationShortName=$ORG_SHORT \
-    EnvironmentLetter=$ENV_LETTER \
-    WorkloadName=$WORKLOAD_NAME \
-    WorkloadShortName=$WORKLOAD_SHORT
-```
-
-This creates the VNet (`vnet-{org}-core-{env}`) and the private DNS zone for APIM's own hostname (empty for now, the record gets written in step 4).
-
-### 2. Validate the config before spending a PremiumV2 activation attempt on it
-
-PremiumV2 activation is slow and rate-limited per subscription (roughly a 60-minute throttle window). This script catches dead-end combinations, Internal mode without an Application Gateway, or injection on a non-PremiumV2 SKU, before you burn that window on a deployment that was never going to work.
-
-```pwsh
-pwsh ./devops/pipelines/scripts/validate.apim.applicationgateway.prerequisites.ps1 `
-  -ApiManagementInternalSubnetAddressSpace "10.0.1.0/24" `
-  -ApplicationGatewaySubnetAddressSpace "10.0.5.0/24" `
-  -ApplicationGatewaySslCertificateData (Get-Content ./agw-demo.pfx.b64 -Raw) `
-  -ApplicationGatewaySslCertificatePassword "ChangeMe123!" `
-  -ApiManagementSku "PremiumV2"
-```
-
-### 3. Deploy core: APIM, workspace gateway, Application Gateway
-
-```bash
-az group create -n "rg-${ORG_NAME}-core-${ENV_LETTER}" -l $LOCATION
-
-az deployment group create \
-  -g "rg-${ORG_NAME}-core-${ENV_LETTER}" \
-  --template-file core/deployment/templates/platform.core.resources.bicep \
-  --parameters \
-    AddressSpaceCoreApimanagementInternal="10.0.1.0/24" \
-    AddressSpaceCoreApimanagementGatewayMain="10.0.9.0/24" \
-    ApiManagementGatewayMainVirtualNetworkType="Internal" \
-    AddressSpaceCoreApplicationGateway="10.0.5.0/24" \
-    ApplicationGatewaySslCertificateData="$(cat agw-demo.pfx.b64)" \
-    ApplicationGatewaySslCertificatePassword="ChangeMe123!" \
-    ApiManagementPublisherEmail="you@example.com" \
-    ApiManagementPublisherName="Sample" \
-    ApiManagementSku="PremiumV2" \
-    WorkloadName=$WORKLOAD_NAME \
-    WorkloadShortName=$WORKLOAD_SHORT \
-    EnvironmentLetter=$ENV_LETTER \
-    OrganizationName=$ORG_NAME \
-    OrganizationShortName=$ORG_SHORT
-```
-
-This is the long step, PremiumV2 provisioning with VNet injection commonly takes 30–60+ minutes. Grab a coffee.
-
-### 4. Write the DNS record for the main gateway's private IP
-
-VNet injection doesn't register DNS automatically the way private endpoints do, and there is no supported API to read the injected instance's private IP (confirmed against CLI, REST, Resource Graph, Portal, and Network Watcher, all come back empty). This script finds it by probing candidate addresses against Application Gateway's own backend-health check, since Application Gateway is the only thing in the VNet that can see whether a candidate address is actually the right one.
-
-```pwsh
-pwsh ./devops/pipelines/scripts/set.apim.internal.dns.record.ps1 `
-  -ApiManagementName "apim-v2-${ORG_SHORT}-core-${ENV_LETTER}" `
-  -PrivateDnsZoneName "apim-v2-${ORG_SHORT}-core-${ENV_LETTER}.azure-api.net" `
-  -PrivateDnsZoneResourceGroupName "rg-${ORG_NAME}-network-${ENV_LETTER}" `
-  -VirtualNetworkName "vnet-${ORG_SHORT}-core-${ENV_LETTER}" `
-  -VirtualNetworkResourceGroupName "rg-${ORG_NAME}-network-${ENV_LETTER}" `
-  -SubnetName "sn-${ORG_SHORT}-core-apim-${ENV_LETTER}" `
-  -ApplicationGatewayName "agw-${ORG_SHORT}-core-${ENV_LETTER}" `
-  -ApplicationGatewayResourceGroupName "rg-${ORG_NAME}-core-${ENV_LETTER}"
-```
-
-It walks candidate addresses, writes each as the DNS A record, waits, and checks Application Gateway's backend health, so this can take a few minutes per candidate tried. It's idempotent: re-running it re-checks the existing record's health first and does nothing if it's still correct.
-
-### 5. Verify
-
-```bash
-AGW_FQDN=$(az deployment group show \
-  -g "rg-${ORG_NAME}-core-${ENV_LETTER}" \
-  -n "core-core-template" \
-  --query "properties.outputs.applicationGatewayFqdn.value" -o tsv)
-
-curl -k "https://${AGW_FQDN}/status-0123456789abcdef"
-```
-
-A `200 OK` with an empty body means Application Gateway can reach the injected APIM main gateway over its private path. `-k` is needed only if you used the self-signed certificate from the prerequisites section.
+  Browsers will flag a self-signed cert; that's expected for a local test. Use a real certificate for anything beyond a smoke test. The base64 content goes into `hip_apimanagement_agw_ssl_certificate_data` in the variable group below.
 
 ## Azure DevOps variable library
 
-The CLI walkthrough above needs none of this. If you run the pipeline path instead (`core/pipeline/pipeline.yml` and `network/pipeline/pipeline.yml`), both pull their values from a **variable group** (the platform calls it `HybridIntegrationPlatform-{env}`, see `stages.core.yml` / `stages.network.yml`), and the `core`/`network` entry points read theirs through a `*.bicepparam` file using `#{token}#` placeholders that Azure DevOps' `qetza.replacetokens` task substitutes at build time. Both `.bicepparam` files are included in this sample (`core/deployment/parameters/` and `network/deployment/parameters/`), already using the tokens below, so defining the variable group is all that's left to make the pipeline path work.
+Both pipelines (`core/pipeline/pipeline.yml` and `network/pipeline/pipeline.yml`) pull their values from a **variable group** (the platform calls it `HybridIntegrationPlatform-{env}`, see `stages.core.yml` / `stages.network.yml`), and the `core`/`network` entry points read theirs through a `*.bicepparam` file using `#{token}#` placeholders that Azure DevOps' `qetza.replacetokens` task substitutes at build time. Both `.bicepparam` files are included in this sample (`core/deployment/parameters/` and `network/deployment/parameters/`), already using the tokens below, so defining the variable group is all that's left to make the pipeline path work.
 
 **`network/deployment/parameters/platform.network.resources.parameters.bicepparam`** (backs `network/deployment/templates/platform.network.resources.bicep`):
 
-| Bicep parameter | `#{token}#` | Deploy-step CLI equivalent (§1) |
-|---|---|---|
-| `AddressSpaceVirtualNetwork` | `#{hip_vnet_addressspace}#` | `AddressSpaceVirtualNetwork` |
-| `WorkloadName` | `#{hip_workload_name}#` | `WorkloadName` |
-| `WorkloadShortName` | `#{hip_workload_shortname}#` | `WorkloadShortName` |
-| `EnvironmentLetter` | `#{hip_do_environmentletter}#` | `EnvironmentLetter` |
-| `OrganizationName` | `#{hip_organization_name}#` | `OrganizationName` |
-| `OrganizationShortName` | `#{hip_organization_shortname}#` | `OrganizationShortName` |
+| Bicep parameter | `#{token}#` |
+|---|---|
+| `AddressSpaceVirtualNetwork` | `#{hip_vnet_addressspace}#` |
+| `WorkloadName` | `#{hip_workload_name}#` |
+| `WorkloadShortName` | `#{hip_workload_shortname}#` |
+| `EnvironmentLetter` | `#{hip_do_environmentletter}#` |
+| `OrganizationName` | `#{hip_organization_name}#` |
+| `OrganizationShortName` | `#{hip_organization_shortname}#` |
 
 The full platform's version of this file also carries `AddressSpaceCoreVirtualNetwork` (`#{hip_vnet_core_addressspace}#`) and `CoreSubscriptionId` (`#{hip_core_subscription_id}#`) for the workload/core VNet split this sample doesn't have; leave those out.
 
 **`core/deployment/parameters/platform.core.resources.parameters.bicepparam`** (backs `core/deployment/templates/platform.core.resources.bicep`):
 
-| Bicep parameter | `#{token}#` | Deploy-step CLI equivalent (§3) |
-|---|---|---|
-| `AddressSpaceCoreApimanagementInternal` | `#{hip_subnet_core_apimanagement_internal}#` | `AddressSpaceCoreApimanagementInternal` |
-| `AddressSpaceCoreApimanagementGatewayMain` | `#{hip_subnet_core_apimanagement_gateway_main}#` | `AddressSpaceCoreApimanagementGatewayMain` |
-| `ApiManagementGatewayMainVirtualNetworkType` | `#{hip_apimanagement_gateway_main_virtual_network_type}#` | `ApiManagementGatewayMainVirtualNetworkType` |
-| `AddressSpaceCoreApplicationGateway` | `#{hip_subnet_core_applicationgateway}#` | `AddressSpaceCoreApplicationGateway` |
-| `ApplicationGatewaySslCertificateData` | `#{hip_apimanagement_agw_ssl_certificate_data}#` | `ApplicationGatewaySslCertificateData` |
-| `ApplicationGatewaySslCertificatePassword` | `#{hip_apimanagement_agw_ssl_certificate_password}#` | `ApplicationGatewaySslCertificatePassword` |
-| `ApiManagementPublisherEmail` | `#{hip_apimanagement_publisher_email}#` | `ApiManagementPublisherEmail` |
-| `ApiManagementPublisherName` | `#{hip_apimanagement_publisher_name}#` | `ApiManagementPublisherName` |
-| `ApiManagementSku` | `#{hip_apimanagement_sku}#` | `ApiManagementSku` |
-| `WorkloadName` | `#{hip_workload_name}#` | `WorkloadName` |
-| `WorkloadShortName` | `#{hip_workload_shortname}#` | `WorkloadShortName` |
-| `EnvironmentLetter` | `#{hip_do_environmentletter}#` | `EnvironmentLetter` |
-| `OrganizationName` | `#{hip_organization_name}#` | `OrganizationName` |
-| `OrganizationShortName` | `#{hip_organization_shortname}#` | `OrganizationShortName` |
+| Bicep parameter | `#{token}#` |
+|---|---|
+| `AddressSpaceCoreApimanagementInternal` | `#{hip_subnet_core_apimanagement_internal}#` |
+| `AddressSpaceCoreApimanagementGatewayMain` | `#{hip_subnet_core_apimanagement_gateway_main}#` |
+| `ApiManagementGatewayMainVirtualNetworkType` | `#{hip_apimanagement_gateway_main_virtual_network_type}#` |
+| `AddressSpaceCoreApplicationGateway` | `#{hip_subnet_core_applicationgateway}#` |
+| `ApplicationGatewaySslCertificateData` | `#{hip_apimanagement_agw_ssl_certificate_data}#` |
+| `ApplicationGatewaySslCertificatePassword` | `#{hip_apimanagement_agw_ssl_certificate_password}#` |
+| `ApiManagementPublisherEmail` | `#{hip_apimanagement_publisher_email}#` |
+| `ApiManagementPublisherName` | `#{hip_apimanagement_publisher_name}#` |
+| `ApiManagementSku` | `#{hip_apimanagement_sku}#` |
+| `WorkloadName` | `#{hip_workload_name}#` |
+| `WorkloadShortName` | `#{hip_workload_shortname}#` |
+| `EnvironmentLetter` | `#{hip_do_environmentletter}#` |
+| `OrganizationName` | `#{hip_organization_name}#` |
+| `OrganizationShortName` | `#{hip_organization_shortname}#` |
 
 The full platform's version of this file also carries `AddressSpaceCoreServicebusBackend`, `AlertEmailAddress`, `AreAlertsEnabled`, `SkuServiceBus`, `TenantId`, and `TenantName`, all removed here along with Service Bus, alerting, and the Entra app registration, see [What was removed and why](#what-was-removed-and-why).
 
-One variable is used directly as a pipeline `$(...)` variable rather than as a bicepparam token: **`hip_workload_location`**, the `-Location` argument on both `az group create` calls in `platform.core.infra.yml` (the CLI walkthrough's `$LOCATION` above).
+One variable is used directly as a pipeline `$(...)` variable rather than as a bicepparam token: **`hip_workload_location`**, the `-Location` argument passed to `az group create` in both `platform.core.infra.yml` and `platform.network.infra.yml`.
 
 **Secret variables**: `hip_apimanagement_agw_ssl_certificate_data` and `hip_apimanagement_agw_ssl_certificate_password` need to be marked *secret* in the variable group, secret variables aren't automatically exposed to the replace-tokens task the way plain ones are, so confirm your pipeline step maps them explicitly (an `env:` block, or an equivalent) if substitution doesn't pick them up.
 
 ## Deploy via Azure DevOps pipeline
-
-Everything below assumes an Azure DevOps project with this repository added as a source (import the GitHub repo, or push it into an Azure Repos project, either works) and the `qetza.replacetokens` extension installed from the Marketplace, the pipeline steps depend on it.
 
 1. **Create the variable group.** Project settings → Pipelines → Library → *+ Variable group*, name it `HybridIntegrationPlatform-o` (the `-o` suffix matches `EnvironmentLetter: "o"` in `stages.core.yml`/`stages.network.yml`; use a different suffix and a matching stage if you want a different environment letter). Add every variable from the two tables above, plus `hip_workload_location`. Mark `hip_apimanagement_agw_ssl_certificate_data` and `hip_apimanagement_agw_ssl_certificate_password` as secret (the padlock icon next to the value).
 
@@ -255,9 +147,17 @@ Everything below assumes an Azure DevOps project with this repository added as a
 
 4. **Run network first, then core.** `platform.core.bicep` looks up the VNet built by the network deployment as an *existing* resource, so the network pipeline has to succeed at least once before the core pipeline can. After that, re-running either independently is safe.
 
-5. **The core pipeline's DNS step still needs the Application Gateway to exist first.** It's the same "Set API Management internal DNS record" step from the CLI walkthrough's §4, now running automatically as the last step of the core pipeline's single job, conditioned on both `hip_subnet_core_apimanagement_internal` and `hip_subnet_core_applicationgateway` being set in the variable group. Leave either blank to skip Internal-mode APIM or Application Gateway entirely, the same opt-in/opt-out behavior the CLI parameters give you.
+5. **The core pipeline's DNS step still needs the Application Gateway to exist first.** It's the "Set API Management internal DNS record" step, running automatically as the last step of the core pipeline's single job, conditioned on both `hip_subnet_core_apimanagement_internal` and `hip_subnet_core_applicationgateway` being set in the variable group. Leave either blank to skip Internal-mode APIM or Application Gateway entirely.
 
-Verification is the same `curl` smoke test as CLI walkthrough §5, just read `applicationGatewayFqdn` from the pipeline run's deployment output (or `az deployment group show`, same command) instead of a shell variable.
+## Verify
+
+Once the core pipeline succeeds, read `applicationGatewayFqdn` from its run's deployment output in the Azure DevOps UI (or fetch it yourself: `az deployment group show -g "rg-<hip_organization_name>-core-<hip_do_environmentletter>" -n "core-core-template" --query "properties.outputs.applicationGatewayFqdn.value" -o tsv`), then:
+
+```bash
+curl -k "https://<applicationGatewayFqdn>/status-0123456789abcdef"
+```
+
+A `200 OK` with an empty body means Application Gateway can reach the injected APIM main gateway over its private path. `-k` is needed only if you used the self-signed certificate from Prerequisites.
 
 ## What was removed and why
 
@@ -280,14 +180,16 @@ None of these are hard to add back, they follow the same module pattern as every
 - **The `apim-v2-` naming.** `platform.core.bicep` names the service `apim-v2-{org}-core-{env}` (there's a `// TODO: change back to apim- without v2` comment right above it in the source). Match this exactly in the DNS script's `-ApiManagementName` and `-PrivateDnsZoneName` arguments, it's easy to typo out the `v2` and have the script silently target a resource that doesn't exist.
 - **The Azure Portal will show a "De service is onderbroken" ("the service is disrupted") banner** on the APIM Overview page the moment the main gateway goes Internal. It isn't actually broken, the portal running in your browser just can't reach a management surface that's no longer public. Check the SLA/scale/API-count fields below the banner; if those resolve, the service is fine.
 - **Internal mode is create-time-only in one direction, not the other.** Going from no VNet injection to injected requires recreating the instance. Flipping an already-injected instance between `External` and `Internal` (`ApiManagementGatewayMainVirtualNetworkType`) is a cheap in-place property update.
-- **The Application Gateway subnet must exist before step 4 works.** `set.apim.internal.dns.record.ps1` uses Application Gateway's backend health as its only way to verify a candidate IP; without it, DNS for the injected instance can't be configured at all. `validate.apim.applicationgateway.prerequisites.ps1` (step 2) catches this combination before you get that far.
-- **PremiumV2 provisioning is slow.** Budget 30–60+ minutes for step 3, and be aware of the ~60-minute per-subscription throttle on PremiumV2 activation attempts mentioned in the validation script, back-to-back failed attempts can compound this.
+- **The Application Gateway subnet must exist before the DNS step works.** `set.apim.internal.dns.record.ps1` uses Application Gateway's backend health as its only way to verify a candidate IP; without it, DNS for the injected instance can't be configured at all. `validate.apim.applicationgateway.prerequisites.ps1`, which runs automatically as the core pipeline's first step, catches this combination before you get that far.
+- **PremiumV2 provisioning is slow.** Budget 30–60+ minutes for the core pipeline's "Deploy platform core resources" step, and be aware of the ~60-minute per-subscription throttle on PremiumV2 activation attempts mentioned in the validation script, back-to-back failed attempts can compound this.
 
 ## Teardown
 
+Neither pipeline deletes resource groups, that's left as a manual step. Using the same `hip_organization_name` / `hip_do_environmentletter` values from the variable group:
+
 ```bash
-az group delete -n "rg-${ORG_NAME}-core-${ENV_LETTER}" --yes --no-wait
-az group delete -n "rg-${ORG_NAME}-network-${ENV_LETTER}" --yes --no-wait
+az group delete -n "rg-<hip_organization_name>-core-<hip_do_environmentletter>" --yes --no-wait
+az group delete -n "rg-<hip_organization_name>-network-<hip_do_environmentletter>" --yes --no-wait
 ```
 
 ## Further reading

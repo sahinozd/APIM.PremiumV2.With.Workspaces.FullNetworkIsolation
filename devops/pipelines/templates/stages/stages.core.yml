@@ -7,8 +7,7 @@ parameters:
 # and carries commented-out Test/Acceptatie/Productie stages for promotion to further environments.
 # Only the single "Ontwikkel" (dev) deploy stage is kept here; every other environment follows the same
 # jobs.deploy.platform.core.infra.yml template with its own variable group, service connection suffix,
-# and agent pool. See README, this pipeline is optional context: the primary deployment path documented
-# there is direct Azure CLI, which doesn't need Azure DevOps at all.
+# and agent pool. See README: this pipeline (core/pipeline/pipeline.yml) is the documented deployment path.
 
 stages:
   - stage: Ontwikkel
