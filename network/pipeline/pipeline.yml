@@ -1,0 +1,32 @@
+name: $(Build.DefinitionName)_$(Date:yyyyMMdd)_$(Rev:r)
+
+trigger:
+  batch: false
+  branches:
+    include:
+      - main
+      - features/*
+  paths:
+    include:
+      - devops/bicep/templates/**
+      - devops/pipelines/scripts/az.group.create.ps1
+      - devops/pipelines/scripts/az.deployment.group.create.ps1
+      - devops/pipelines/templates/pipeline.network.template.yml
+      - devops/pipelines/templates/stages/stages.network.yml
+      - devops/pipelines/templates/jobs/jobs.deploy.platform.network.infra.yml
+      - devops/pipelines/templates/steps/deploy/platform.network.infra.yml
+      - network/**
+
+parameters:
+  - name: serviceConnectionBase
+    displayName: 'Azure service connection base name'
+    type: string
+    # Must match an Azure Resource Manager service connection in your Azure DevOps project, with
+    # " - Ontwikkel" appended (see jobs.deploy.platform.network.infra.yml / stages.network.yml).
+    # Override this default with your own connection name when you set up the pipeline.
+    default: 'Azure ARM - apim-full-isolation-sample'
+
+extends:
+  template: ../../devops/pipelines/templates/pipeline.network.template.yml
+  parameters:
+    serviceConnectionBase: ${{ parameters.serviceConnectionBase }}

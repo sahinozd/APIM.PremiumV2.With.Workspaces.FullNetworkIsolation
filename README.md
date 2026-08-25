@@ -1,6 +1,6 @@
 # Sealing the Gateway, minimal working sample
 
-A self-contained, deployable extraction of the Bicep behind ["Sealing the Gateway"](https://sahinozdemir.nl/sealing-the-gateway-taking-api-management-v2-with-workspace-gateways-fully-private-behind-a-waf-part-2/) (part 2 of the Azure API Management v2 series, following [part 1](https://sahinozdemir.nl/deploying-azure-api-management-v2-with-vnet-injection-workspaces-and-a-workspace-gateway-the-parts-nobody-documented/)):
+A self-contained, deployable extraction of the Bicep behind ["Sealing the Gateway"](https://sahinozdemir.nl) (part 2 of the Azure API Management v2 series, following [part 1](https://sahinozdemir.nl/deploying-azure-api-management-v2-with-vnet-injection-workspaces-and-a-workspace-gateway-the-parts-nobody-documented/)):
 
 - API Management v2 (PremiumV2), **main gateway in Internal mode**, no public inbound of its own
 - A **workspace gateway**, also Internal, serving two sample workspaces
@@ -32,11 +32,19 @@ network template. No workload VNet, no peering, single resource group per tier.
 ```
 README.md
 
-network/deployment/templates/
-  platform.network.resources.bicep     entry point: builds the VNet + APIM private DNS zone
+network/pipeline/
+  pipeline.yml                          Azure DevOps pipeline entry point for the network deployment
 
-core/deployment/templates/
-  platform.core.resources.bicep        entry point: builds APIM + workspace gateway + Application Gateway
+core/pipeline/
+  pipeline.yml                          Azure DevOps pipeline entry point for the core deployment
+
+network/deployment/
+  templates/platform.network.resources.bicep      entry point: builds the VNet + APIM private DNS zone
+  parameters/platform.network.resources.parameters.bicepparam   #{token}# values for the pipeline path
+
+core/deployment/
+  templates/platform.core.resources.bicep         entry point: builds APIM + workspace gateway + Application Gateway
+  parameters/platform.core.resources.parameters.bicepparam      #{token}# values for the pipeline path
 
 devops/bicep/templates/
   platform.network.bicep               orchestration: VNet, private DNS zone, VNet link
@@ -57,15 +65,18 @@ devops/bicep/templates/
 
 devops/pipelines/
   scripts/
-    validate.apim.applicationgateway.prerequisites.ps1   fail-fast config gate, run before deploying
-    set.apim.internal.dns.record.ps1                      finds the main gateway's VIP, writes the DNS record
+    az.group.create.ps1                                    idempotent resource group creation
+    az.deployment.group.create.ps1                          thin az deployment group create wrapper
+    validate.apim.applicationgateway.prerequisites.ps1       fail-fast config gate, run before deploying
+    set.apim.internal.dns.record.ps1                         finds the main gateway's VIP, writes the DNS record
   templates/
-    jobs/jobs.deploy.platform.core.infra.yml               Azure DevOps job wrapper (optional, see below)
-    stages/stages.core.yml                                 Azure DevOps stage wrapper (optional, see below)
-    steps/deploy/platform.core.infra.yml                    Azure DevOps step sequence (optional, see below)
+    pipeline.core.template.yml / pipeline.network.template.yml    sourceRoot + stage template wiring
+    stages/stages.core.yml / stages.network.yml                    the "Ontwikkel" (dev) deploy stage
+    jobs/jobs.deploy.platform.core.infra.yml / ...network...        Azure DevOps deployment-job wrapper
+    steps/deploy/platform.core.infra.yml / ...network...            the actual step sequence (validate, deploy, set DNS)
 ```
 
-The `devops/pipelines` YAML files are **reference only**. They show how this wires into an Azure DevOps pipeline, but the deployment steps below use plain Azure CLI directly and don't need Azure DevOps at all.
+Two ways to run this: the **Azure CLI walkthrough** below (fastest way to try it out, no Azure DevOps needed), or the **Azure DevOps pipeline** (`core/pipeline/pipeline.yml` and `network/pipeline/pipeline.yml`), documented after it. Both drive the exact same Bicep.
 
 ## Prerequisites
 
@@ -85,7 +96,7 @@ The `devops/pipelines` YAML files are **reference only**. They show how this wir
 
   Browsers will flag a self-signed cert; that's expected for a local test. Use a real certificate for anything beyond a smoke test.
 
-## Deploy
+## Deploy via Azure CLI
 
 All commands assume `bash`/`pwsh` in the repo root of this folder, and that you're logged in (`az login`) with the right subscription selected (`az account set --subscription <id>`).
 
@@ -190,9 +201,9 @@ curl -k "https://${AGW_FQDN}/status-0123456789abcdef"
 
 A `200 OK` with an empty body means Application Gateway can reach the injected APIM main gateway over its private path. `-k` is needed only if you used the self-signed certificate from the prerequisites section.
 
-## Azure DevOps variable library (optional)
+## Azure DevOps variable library
 
-The CLI walkthrough above is the primary path and needs none of this. If you do want to wire this sample into the Azure DevOps pipeline templates under `devops/pipelines/` instead, they pull their values from a **variable group** (the platform calls it `HybridIntegrationPlatform-{env}`, see `stages.core.yml`), and the `core`/`network` entry points read theirs through a `*.bicepparam` file using `#{token}#` placeholders that Azure DevOps' `qetza.replacetokens` task substitutes at build time. Neither `.bicepparam` file is included in this pruned sample (the CLI path passes `--parameters` directly instead), but if you add your own, following the full platform's naming convention, these are the tokens relevant to what's actually deployed here.
+The CLI walkthrough above needs none of this. If you run the pipeline path instead (`core/pipeline/pipeline.yml` and `network/pipeline/pipeline.yml`), both pull their values from a **variable group** (the platform calls it `HybridIntegrationPlatform-{env}`, see `stages.core.yml` / `stages.network.yml`), and the `core`/`network` entry points read theirs through a `*.bicepparam` file using `#{token}#` placeholders that Azure DevOps' `qetza.replacetokens` task substitutes at build time. Both `.bicepparam` files are included in this sample (`core/deployment/parameters/` and `network/deployment/parameters/`), already using the tokens below, so defining the variable group is all that's left to make the pipeline path work.
 
 **`network/deployment/parameters/platform.network.resources.parameters.bicepparam`** (backs `network/deployment/templates/platform.network.resources.bicep`):
 
@@ -231,6 +242,22 @@ The full platform's version of this file also carries `AddressSpaceCoreServicebu
 One variable is used directly as a pipeline `$(...)` variable rather than as a bicepparam token: **`hip_workload_location`**, the `-Location` argument on both `az group create` calls in `platform.core.infra.yml` (the CLI walkthrough's `$LOCATION` above).
 
 **Secret variables**: `hip_apimanagement_agw_ssl_certificate_data` and `hip_apimanagement_agw_ssl_certificate_password` need to be marked *secret* in the variable group, secret variables aren't automatically exposed to the replace-tokens task the way plain ones are, so confirm your pipeline step maps them explicitly (an `env:` block, or an equivalent) if substitution doesn't pick them up.
+
+## Deploy via Azure DevOps pipeline
+
+Everything below assumes an Azure DevOps project with this repository added as a source (import the GitHub repo, or push it into an Azure Repos project, either works) and the `qetza.replacetokens` extension installed from the Marketplace, the pipeline steps depend on it.
+
+1. **Create the variable group.** Project settings → Pipelines → Library → *+ Variable group*, name it `HybridIntegrationPlatform-o` (the `-o` suffix matches `EnvironmentLetter: "o"` in `stages.core.yml`/`stages.network.yml`; use a different suffix and a matching stage if you want a different environment letter). Add every variable from the two tables above, plus `hip_workload_location`. Mark `hip_apimanagement_agw_ssl_certificate_data` and `hip_apimanagement_agw_ssl_certificate_password` as secret (the padlock icon next to the value).
+
+2. **Create a service connection.** Project settings → Service connections → *New service connection* → Azure Resource Manager, scoped to the subscription you're deploying into. Name it to match the pipelines' `serviceConnectionBase` default plus the environment suffix the stage templates append, e.g. a connection named `Azure ARM - apim-full-isolation-sample - Ontwikkel` matches `core/pipeline/pipeline.yml`'s default unchanged. Either name it exactly that, or override `serviceConnectionBase` when you create the pipeline in the next step.
+
+3. **Create the two pipelines.** Pipelines → *New pipeline* → point it at this repo → "Existing Azure Pipelines YAML file" → `/network/pipeline/pipeline.yml`. Repeat for `/core/pipeline/pipeline.yml`. Name them so it's obvious which is which, e.g. "network-infra" and "core-infra".
+
+4. **Run network first, then core.** `platform.core.bicep` looks up the VNet built by the network deployment as an *existing* resource, so the network pipeline has to succeed at least once before the core pipeline can. After that, re-running either independently is safe.
+
+5. **The core pipeline's DNS step still needs the Application Gateway to exist first.** It's the same "Set API Management internal DNS record" step from the CLI walkthrough's §4, now running automatically as the last step of the core pipeline's single job, conditioned on both `hip_subnet_core_apimanagement_internal` and `hip_subnet_core_applicationgateway` being set in the variable group. Leave either blank to skip Internal-mode APIM or Application Gateway entirely, the same opt-in/opt-out behavior the CLI parameters give you.
+
+Verification is the same `curl` smoke test as CLI walkthrough §5, just read `applicationGatewayFqdn` from the pipeline run's deployment output (or `az deployment group show`, same command) instead of a shell variable.
 
 ## What was removed and why
 

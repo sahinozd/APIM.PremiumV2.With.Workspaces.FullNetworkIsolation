@@ -1,0 +1,35 @@
+name: $(Build.DefinitionName)_$(Date:yyyyMMdd)_$(Rev:r)
+
+trigger:
+  # false by default so a network-only change doesn't also kick off a core deployment.
+  batch: false
+  branches:
+    include:
+      - main
+      - features/*
+  paths:
+    include:
+      - devops/bicep/templates/**
+      - devops/pipelines/scripts/az.group.create.ps1
+      - devops/pipelines/scripts/az.deployment.group.create.ps1
+      - devops/pipelines/scripts/validate.apim.applicationgateway.prerequisites.ps1
+      - devops/pipelines/scripts/set.apim.internal.dns.record.ps1
+      - devops/pipelines/templates/pipeline.core.template.yml
+      - devops/pipelines/templates/stages/stages.core.yml
+      - devops/pipelines/templates/jobs/jobs.deploy.platform.core.infra.yml
+      - devops/pipelines/templates/steps/deploy/platform.core.infra.yml
+      - core/**
+
+parameters:
+  - name: serviceConnectionBase
+    displayName: 'Azure service connection base name'
+    type: string
+    # Must match an Azure Resource Manager service connection in your Azure DevOps project, with
+    # " - Ontwikkel" appended (see jobs.deploy.platform.core.infra.yml / stages.core.yml). Override
+    # this default with your own connection name when you set up the pipeline.
+    default: 'Azure ARM - apim-full-isolation-sample'
+
+extends:
+  template: ../../devops/pipelines/templates/pipeline.core.template.yml
+  parameters:
+    serviceConnectionBase: ${{ parameters.serviceConnectionBase }}

@@ -1,0 +1,21 @@
+parameters:
+  - name: serviceConnectionBase
+    type: string
+
+# Pruned the same way as stages.core.yml: no Build stage (no bicep lint job in this sample), and only
+# the "Ontwikkel" (dev) deploy stage, other environments follow the same
+# jobs.deploy.platform.network.infra.yml template with their own variable group, service connection
+# suffix, and agent pool.
+
+stages:
+  - stage: Ontwikkel
+    variables:
+      - group: "HybridIntegrationPlatform-o"
+    pool:
+      name: 'Azure Pipelines'
+    jobs:
+      - template: ../jobs/jobs.deploy.platform.network.infra.yml
+        parameters:
+          AzureDevOpsServiceConnection: "${{ parameters.serviceConnectionBase }} - Ontwikkel"
+          EnvironmentLetter: "o"
+          EnvironmentName: "Hybrid-Integration-Platform-Ontwikkel"

@@ -2,17 +2,14 @@ parameters:
   - name: AzureDevOpsServiceConnection
     type: string
 
-# Reference only: this pipeline is optional context for how the deployment wires into Azure DevOps.
-# The primary path documented in README is direct Azure CLI (az group create / az deployment group
-# create), which doesn't need any of this. Two changes versus the full platform's copy of this file:
-#   1. The "Replace tokens..." step assumes a core/deployment/parameters/*.bicepparam file with
-#      token placeholders that isn't part of this sample (params are passed directly via `--parameters`
-#      in the CLI path instead). Left in as reference; you'd need your own parameters file to use it.
-#   2. -ApiManagementName and -PrivateDnsZoneName below were corrected to include "-v2-": the upstream
-#      platform's copy of this step is missing it (platform.core.bicep names the service
-#      "apim-v2-{org}-core-{env}", see the "TODO: change back to apim- without v2" comment there), which
-#      would point this script at a resource name that doesn't exist. Worth checking against your own
-#      copy of platform.core.bicep if that TODO is ever resolved upstream.
+# This is a working deployment path, driven by core/pipeline/pipeline.yml, not just reference. The
+# CLI walkthrough in README is still the faster way to try this out; use this one if you actually want
+# it running in Azure DevOps. One change versus the full platform's copy of this file:
+#   -ApiManagementName and -PrivateDnsZoneName below were corrected to include "-v2-": the upstream
+#   platform's copy of this step is missing it (platform.core.bicep names the service
+#   "apim-v2-{org}-core-{env}", see the "TODO: change back to apim- without v2" comment there), which
+#   would point this script at a resource name that doesn't exist. Worth checking against your own
+#   copy of platform.core.bicep if that TODO is ever resolved upstream.
 
 steps:
   - checkout: self

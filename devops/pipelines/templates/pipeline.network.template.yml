@@ -1,0 +1,14 @@
+parameters:
+  - name: serviceConnectionBase
+    type: string
+
+variables:
+  # See the matching comment in pipeline.core.template.yml: this sample repo has no solution-folder
+  # nesting, so sourceRoot is just ".".
+  - name: sourceRoot
+    value: .
+
+stages:
+  - template: stages/stages.network.yml
+    parameters:
+      serviceConnectionBase: ${{ parameters.serviceConnectionBase }}

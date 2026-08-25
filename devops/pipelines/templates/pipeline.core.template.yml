@@ -1,0 +1,15 @@
+parameters:
+  - name: serviceConnectionBase
+    type: string
+
+variables:
+  # In the full platform this repo is nested under a solution folder (hence a longer sourceRoot);
+  # in this sample repo, core/, network/, and devops/ sit directly at the repo root, so sourceRoot
+  # is just ".". Every path in the templates below is built as $(Build.SourcesDirectory)/$(sourceRoot)/...
+  - name: sourceRoot
+    value: .
+
+stages:
+  - template: stages/stages.core.yml
+    parameters:
+      serviceConnectionBase: ${{ parameters.serviceConnectionBase }}

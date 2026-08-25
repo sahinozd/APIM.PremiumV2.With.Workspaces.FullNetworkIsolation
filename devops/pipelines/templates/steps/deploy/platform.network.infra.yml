@@ -1,0 +1,36 @@
+parameters:
+  - name: AzureDevOpsServiceConnection
+    type: string
+
+steps:
+  - checkout: self
+    path: s
+
+  - task: qetza.replacetokens.replacetokens-task.replacetokens@6
+    displayName: "Replace tokens in platform network infra parameters"
+    inputs:
+      targetFiles: |
+        $(Build.SourcesDirectory)/$(sourceRoot)/network/deployment/parameters/platform.network.resources.parameters.bicepparam
+
+  - task: AzureCLI@2
+    displayName: "Create network resource group"
+    inputs:
+      azureSubscription: "${{ parameters.AzureDevOpsServiceConnection }}"
+      scriptType: "pscore"
+      scriptLocation: "scriptPath"
+      scriptPath: "$(Build.SourcesDirectory)/$(sourceRoot)/devops/pipelines/scripts/az.group.create.ps1"
+      arguments: >-
+        -ResourceGroupName "rg-$(hip_organization_name)-network-$(hip_do_environmentletter)"
+        -Location '$(hip_workload_location)'
+
+  - task: AzureCLI@2
+    displayName: "Deploy platform network resources"
+    inputs:
+      azureSubscription: "${{ parameters.AzureDevOpsServiceConnection }}"
+      scriptType: "pscore"
+      scriptLocation: "scriptPath"
+      scriptPath: "$(Build.SourcesDirectory)/$(sourceRoot)/devops/pipelines/scripts/az.deployment.group.create.ps1"
+      arguments: >-
+        -ResourceGroupName "rg-$(hip_organization_name)-network-$(hip_do_environmentletter)"
+        -TemplateFile "$(Build.SourcesDirectory)/$(sourceRoot)/network/deployment/templates/platform.network.resources.bicep"
+        -ParametersFile "$(Build.SourcesDirectory)/$(sourceRoot)/network/deployment/parameters/platform.network.resources.parameters.bicepparam"
