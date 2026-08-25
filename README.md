@@ -190,6 +190,48 @@ curl -k "https://${AGW_FQDN}/status-0123456789abcdef"
 
 A `200 OK` with an empty body means Application Gateway can reach the injected APIM main gateway over its private path. `-k` is needed only if you used the self-signed certificate from the prerequisites section.
 
+## Azure DevOps variable library (optional)
+
+The CLI walkthrough above is the primary path and needs none of this. If you do want to wire this sample into the Azure DevOps pipeline templates under `devops/pipelines/` instead, they pull their values from a **variable group** (the platform calls it `HybridIntegrationPlatform-{env}`, see `stages.core.yml`), and the `core`/`network` entry points read theirs through a `*.bicepparam` file using `#{token}#` placeholders that Azure DevOps' `qetza.replacetokens` task substitutes at build time. Neither `.bicepparam` file is included in this pruned sample (the CLI path passes `--parameters` directly instead), but if you add your own, following the full platform's naming convention, these are the tokens relevant to what's actually deployed here.
+
+**`network/deployment/parameters/platform.network.resources.parameters.bicepparam`** (backs `network/deployment/templates/platform.network.resources.bicep`):
+
+| Bicep parameter | `#{token}#` | Deploy-step CLI equivalent (§1) |
+|---|---|---|
+| `AddressSpaceVirtualNetwork` | `#{hip_vnet_addressspace}#` | `AddressSpaceVirtualNetwork` |
+| `WorkloadName` | `#{hip_workload_name}#` | `WorkloadName` |
+| `WorkloadShortName` | `#{hip_workload_shortname}#` | `WorkloadShortName` |
+| `EnvironmentLetter` | `#{hip_do_environmentletter}#` | `EnvironmentLetter` |
+| `OrganizationName` | `#{hip_organization_name}#` | `OrganizationName` |
+| `OrganizationShortName` | `#{hip_organization_shortname}#` | `OrganizationShortName` |
+
+The full platform's version of this file also carries `AddressSpaceCoreVirtualNetwork` (`#{hip_vnet_core_addressspace}#`) and `CoreSubscriptionId` (`#{hip_core_subscription_id}#`) for the workload/core VNet split this sample doesn't have; leave those out.
+
+**`core/deployment/parameters/platform.core.resources.parameters.bicepparam`** (backs `core/deployment/templates/platform.core.resources.bicep`):
+
+| Bicep parameter | `#{token}#` | Deploy-step CLI equivalent (§3) |
+|---|---|---|
+| `AddressSpaceCoreApimanagementInternal` | `#{hip_subnet_core_apimanagement_internal}#` | `AddressSpaceCoreApimanagementInternal` |
+| `AddressSpaceCoreApimanagementGatewayMain` | `#{hip_subnet_core_apimanagement_gateway_main}#` | `AddressSpaceCoreApimanagementGatewayMain` |
+| `ApiManagementGatewayMainVirtualNetworkType` | `#{hip_apimanagement_gateway_main_virtual_network_type}#` | `ApiManagementGatewayMainVirtualNetworkType` |
+| `AddressSpaceCoreApplicationGateway` | `#{hip_subnet_core_applicationgateway}#` | `AddressSpaceCoreApplicationGateway` |
+| `ApplicationGatewaySslCertificateData` | `#{hip_apimanagement_agw_ssl_certificate_data}#` | `ApplicationGatewaySslCertificateData` |
+| `ApplicationGatewaySslCertificatePassword` | `#{hip_apimanagement_agw_ssl_certificate_password}#` | `ApplicationGatewaySslCertificatePassword` |
+| `ApiManagementPublisherEmail` | `#{hip_apimanagement_publisher_email}#` | `ApiManagementPublisherEmail` |
+| `ApiManagementPublisherName` | `#{hip_apimanagement_publisher_name}#` | `ApiManagementPublisherName` |
+| `ApiManagementSku` | `#{hip_apimanagement_sku}#` | `ApiManagementSku` |
+| `WorkloadName` | `#{hip_workload_name}#` | `WorkloadName` |
+| `WorkloadShortName` | `#{hip_workload_shortname}#` | `WorkloadShortName` |
+| `EnvironmentLetter` | `#{hip_do_environmentletter}#` | `EnvironmentLetter` |
+| `OrganizationName` | `#{hip_organization_name}#` | `OrganizationName` |
+| `OrganizationShortName` | `#{hip_organization_shortname}#` | `OrganizationShortName` |
+
+The full platform's version of this file also carries `AddressSpaceCoreServicebusBackend`, `AlertEmailAddress`, `AreAlertsEnabled`, `SkuServiceBus`, `TenantId`, and `TenantName`, all removed here along with Service Bus, alerting, and the Entra app registration, see [What was removed and why](#what-was-removed-and-why).
+
+One variable is used directly as a pipeline `$(...)` variable rather than as a bicepparam token: **`hip_workload_location`**, the `-Location` argument on both `az group create` calls in `platform.core.infra.yml` (the CLI walkthrough's `$LOCATION` above).
+
+**Secret variables**: `hip_apimanagement_agw_ssl_certificate_data` and `hip_apimanagement_agw_ssl_certificate_password` need to be marked *secret* in the variable group, secret variables aren't automatically exposed to the replace-tokens task the way plain ones are, so confirm your pipeline step maps them explicitly (an `env:` block, or an equivalent) if substitution doesn't pick them up.
+
 ## What was removed and why
 
 The full platform repo bundles this pattern together with several unrelated concerns. All of it was stripped out here so the sample only carries what's needed to stand up private APIM + workspace gateway + WAF Application Gateway:
