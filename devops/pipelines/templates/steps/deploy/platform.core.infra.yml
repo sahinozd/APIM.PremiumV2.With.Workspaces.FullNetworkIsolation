@@ -1,0 +1,87 @@
+parameters:
+  - name: AzureDevOpsServiceConnection
+    type: string
+
+# Reference only: this pipeline is optional context for how the deployment wires into Azure DevOps.
+# The primary path documented in README is direct Azure CLI (az group create / az deployment group
+# create), which doesn't need any of this. Two changes versus the full platform's copy of this file:
+#   1. The "Replace tokens..." step assumes a core/deployment/parameters/*.bicepparam file with
+#      token placeholders that isn't part of this sample (params are passed directly via `--parameters`
+#      in the CLI path instead). Left in as reference; you'd need your own parameters file to use it.
+#   2. -ApiManagementName and -PrivateDnsZoneName below were corrected to include "-v2-": the upstream
+#      platform's copy of this step is missing it (platform.core.bicep names the service
+#      "apim-v2-{org}-core-{env}", see the "TODO: change back to apim- without v2" comment there), which
+#      would point this script at a resource name that doesn't exist. Worth checking against your own
+#      copy of platform.core.bicep if that TODO is ever resolved upstream.
+
+steps:
+  - checkout: self
+    path: s
+
+  # Fails fast, before the resource group or any deployment is even attempted. Catching a bad config
+  # combination here avoids spending a PremiumV2 activation attempt against Azure's 60-minute
+  # per-subscription throttle on a deployment that was never going to work anyway.
+  - task: PowerShell@2
+    displayName: "Validate APIM Internal + Application Gateway prerequisites"
+    inputs:
+      targetType: "filePath"
+      filePath: "$(Build.SourcesDirectory)/$(sourceRoot)/devops/pipelines/scripts/validate.apim.applicationgateway.prerequisites.ps1"
+      arguments: >-
+        -ApiManagementInternalSubnetAddressSpace "$(hip_subnet_core_apimanagement_internal)"
+        -ApplicationGatewaySubnetAddressSpace "$(hip_subnet_core_applicationgateway)"
+        -ApplicationGatewaySslCertificateData "$(hip_apimanagement_agw_ssl_certificate_data)"
+        -ApplicationGatewaySslCertificatePassword "$(hip_apimanagement_agw_ssl_certificate_password)"
+        -ApiManagementSku "$(hip_apimanagement_sku)"
+      pwsh: true
+
+  - task: qetza.replacetokens.replacetokens-task.replacetokens@6
+    displayName: "Replace tokens in platform core infra parameters"
+    inputs:
+      targetFiles: |
+        $(Build.SourcesDirectory)/$(sourceRoot)/core/deployment/parameters/platform.core.resources.parameters.bicepparam
+
+  - task: AzureCLI@2
+    displayName: "Create core resource group"
+    inputs:
+      azureSubscription: "${{ parameters.AzureDevOpsServiceConnection }}"
+      scriptType: "pscore"
+      scriptLocation: "scriptPath"
+      scriptPath: "$(Build.SourcesDirectory)/$(sourceRoot)/devops/pipelines/scripts/az.group.create.ps1"
+      arguments: >-
+        -ResourceGroupName "rg-$(hip_organization_name)-core-$(hip_do_environmentletter)"
+        -Location '$(hip_workload_location)'
+
+  - task: AzureCLI@2
+    displayName: "Deploy platform core resources"
+    inputs:
+      azureSubscription: "${{ parameters.AzureDevOpsServiceConnection }}"
+      scriptType: "pscore"
+      scriptLocation: "scriptPath"
+      scriptPath: "$(Build.SourcesDirectory)/$(sourceRoot)/devops/pipelines/scripts/az.deployment.group.create.ps1"
+      arguments: >-
+        -ResourceGroupName "rg-$(hip_organization_name)-core-$(hip_do_environmentletter)"
+        -TemplateFile "$(Build.SourcesDirectory)/$(sourceRoot)/core/deployment/templates/platform.core.resources.bicep"
+        -ParametersFile "$(Build.SourcesDirectory)/$(sourceRoot)/core/deployment/parameters/platform.core.resources.parameters.bicepparam"
+
+  # VNet injection has no automatic DNS registration, and the private VIP has no supported API to read
+  # (see set.apim.internal.dns.record.ps1 header). Auto-discovers it by probing candidate addresses
+  # against Application Gateway's backend health, so this requires hip_subnet_core_applicationgateway
+  # to be set. The DNS zone is scoped to the full instance FQDN, see platform.network.bicep.
+  - task: AzurePowerShell@5
+    displayName: "Set API Management internal DNS record"
+    condition: and(succeeded(), ne(variables['hip_subnet_core_apimanagement_internal'], ''), ne(variables['hip_subnet_core_applicationgateway'], ''))
+    inputs:
+      azureSubscription: "${{ parameters.AzureDevOpsServiceConnection }}"
+      ScriptType: "FilePath"
+      ScriptPath: "$(Build.SourcesDirectory)/$(sourceRoot)/devops/pipelines/scripts/set.apim.internal.dns.record.ps1"
+      ScriptArguments: >-
+        -ApiManagementName "apim-v2-$(hip_organization_shortname)-core-$(hip_do_environmentletter)"
+        -PrivateDnsZoneName "apim-v2-$(hip_organization_shortname)-core-$(hip_do_environmentletter).azure-api.net"
+        -PrivateDnsZoneResourceGroupName "rg-$(hip_organization_name)-network-$(hip_do_environmentletter)"
+        -VirtualNetworkName "vnet-$(hip_organization_shortname)-core-$(hip_do_environmentletter)"
+        -VirtualNetworkResourceGroupName "rg-$(hip_organization_name)-network-$(hip_do_environmentletter)"
+        -SubnetName "sn-$(hip_organization_shortname)-core-apim-$(hip_do_environmentletter)"
+        -ApplicationGatewayName "agw-$(hip_organization_shortname)-core-$(hip_do_environmentletter)"
+        -ApplicationGatewayResourceGroupName "rg-$(hip_organization_name)-core-$(hip_do_environmentletter)"
+      azurePowerShellVersion: "LatestVersion"
+      pwsh: true

@@ -1,0 +1,24 @@
+parameters:
+  - name: serviceConnectionBase
+    type: string
+
+# Pruned for the "Sealing the Gateway" minimal sample: the full stages.core.yml also runs a "Build"
+# stage (bicep lint/validate via jobs.build.core.yml, not included in this sample) ahead of Ontwikkel,
+# and carries commented-out Test/Acceptatie/Productie stages for promotion to further environments.
+# Only the single "Ontwikkel" (dev) deploy stage is kept here; every other environment follows the same
+# jobs.deploy.platform.core.infra.yml template with its own variable group, service connection suffix,
+# and agent pool. See README, this pipeline is optional context: the primary deployment path documented
+# there is direct Azure CLI, which doesn't need Azure DevOps at all.
+
+stages:
+  - stage: Ontwikkel
+    variables:
+      - group: "HybridIntegrationPlatform-o"
+    pool:
+      name: 'Azure Pipelines'
+    jobs:
+      - template: ../jobs/jobs.deploy.platform.core.infra.yml
+        parameters:
+          AzureDevOpsServiceConnection: "${{ parameters.serviceConnectionBase }} - Ontwikkel"
+          EnvironmentLetter: "o"
+          EnvironmentName: "Hybrid-Integration-Platform-Ontwikkel"

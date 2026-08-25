@@ -1,0 +1,22 @@
+parameters:
+  - name: AzureDevOpsServiceConnection
+    type: string
+  - name: EnvironmentLetter
+    type: string
+  - name: EnvironmentName
+    type: string
+
+jobs:
+  - deployment: deploy_platform_core_infra
+    displayName: "Deploy platform core infrastructure"
+    variables:
+      - group: "HybridIntegrationPlatform-${{ parameters.EnvironmentLetter }}"
+
+    environment: "${{ parameters.EnvironmentName }}"
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - template: ../steps/deploy/platform.core.infra.yml
+              parameters:
+                AzureDevOpsServiceConnection: ${{ parameters.AzureDevOpsServiceConnection }}
